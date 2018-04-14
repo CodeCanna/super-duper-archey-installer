@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# TODO::DONE: Fix not mounting root bug.
+# TODO::DONE: Fix not turning swap on.
+# TODO::DONE: Fix cfdisk menu option.
+# TODO: Keep testing it until it is easy to use.
+# TODO::DONE: Add lsblk after cfdisk.
+
+clear;
+EFI=0;
+
+# Check if ran as root
+if [ $EUID != 0 ]; then
+  echo "Script must be ran as root.";
+  exit;
+fi
+
+echo "------------------------------------------------------------------";
+echo "-  WELCOME TO ENTERARCHWAY - MY FIRST ARCHLINUX INSTALL SCRIPT!  -";
+echo "------------------------------------------------------------------";
+# Check for efi
+if [ -d /sys/firmware/efi ]; then
+  EFI=1;
+  echo "You are in UEFI boot mode.";
+else
+  echo "You are in Legacy boot mode";
+fi
+
+# Get devs in /dev
+for file in /dev/sd?;
+do
+    #DEVICE_ARR=("${DEVICE_ARR[@]}" "$file")   # Add devs to array.
+    DEVICE_ARR+=($file);
+done
+
+echo "Choose device to format: ";
+
+select device in ${DEVICE_ARR[@]}; do
+  echo "You picked " $device;
+  break;
+done
+
+clear
+
+#Partition drives
+if [ $EFI -eq 1 ];then
+  echo "###################################################################################";
+  echo "REMEMBER! you are booted in UEFI mode and must include an 'EFI System Partition!'";
+  echo "###################################################################################";
+else
+  echo "###################################################################################";
+  echo "REMEMBER! you are booted in Legacy mode and must include a BIOS Boot Partition";
+  echo "###################################################################################";
+fi
+echo "Would you like to open cfdisk? (y,n)";
+read open_formatter;
+if [ "$open_formatter" == 'y' ] || [ "$open_formatter" == "" ];then
+  echo "Starting cfdisk for " $device;
+  sleep 1;
+  cfdisk -z $device;
+else
+  exit;
+fi
+
+clear;
+
+# Get partitions, format and mount them.
+
+# Get root partition
+lsblk
+echo "What is your root partition?: " $device;
+read root_part;
+ROOT=$device$root_part;
+echo "Your root partition is " $ROOT;
+
+clear
+
+# Get Boot Partition
+lsblk
+echo "What is your boot partition?: " $device;
+read boot_part;
+BOOT_PART=$device$boot_part;
+
+clear
+
+# Get Home Partition
+lsblk
+echo "What is your Home partition?: " $device;
+read home_part;
+HOME_PART=$device$home_part;
+
+clear
+
+# Get Swap Partition
+lsblk
+echo "What is your swap?: " $device;
+read swap_part;
+SWAP_PART=$device$swap_part;
+
+clear
+
+echo "------------------------------------------------";
+echo " PARTITION LAYOUT";
+echo "Root Partition: " $ROOT;
+echo "Boot Partition: " $BOOT_PART;
+echo "Home Partition: " $HOME_PART;
+echo "Swap Partition: " $SWAP_PART;
+echo "------------------------------------------------";
+
+# Format partitions
+if [ $EFI -eq 1 ];then
+  echo "Formatting for EFI Boot Partition.";
+  mkfs.fat -F32 $BOOT_PART;
+fi
+
+echo "Formatting Root partition.";
+mkfs.ext4 $ROOT;
+
+echo "Formatting Home Partition.";
+mkfs.ext4 $HOME_PART;
+
+echo "Creating Swap Partition.";
+mkswap $SWAP_PART;
+
+# Mount partitions
+echo "Mounting Partitions..."
+sleep 2;
+
+swapon $SWAP_PART;
+mount $ROOT /mnt;
+mkdir /mnt/home;
+mount $HOME_PART /mnt/home;
+mkdir /mnt/boot;
+mount $BOOT_PART /mnt/boot;
+
+# Rank mirrors
+echo "Ranking Mirrors by connection speed.";
+cp /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.back;
+rankmirrors /etc/pacman.d/mirrorlist > /etc/pacman.d/mirrorlist.back;
+echo "Ranking mirror connections...Please Wait.";
+mv /etc/pacman.d/mirrorlist.back /etc/pacman.d/mirrorlist;
+
+# Install base
+echo "Start Install (y,n)";
+read START_INSTALL;
+if [ "$START_INSTALL" == "y" ] || [ "$START_INSTALL" == "Y" ] || [ "$START_INSTALL" == "" ];then
+  pacstrap /mnt base base-devel
+  clear
+  genfstab -U /mnt > /mnt/etc/fstab;
+  arch-chroot /mnt;
+  echo "You are now in you system.  Will you see this message?";
+else
+  echo "Closing...";
+  exit;
+fi
