@@ -4,10 +4,128 @@
 # TODO::DONE: Fix cfdisk menu option.
 # TODO: Keep testing it until it is easy to use.
 # TODO::DONE: Add lsblk after cfdisk.
+# TODO: Put everything in a function, IE Functionize.
+# TODO: Test for Legacy and fix any problems with Legacy install.
+# TODO: Fix line 85 syntax error on Package Install Script
 
 clear;
 EFI=0;
 
+# Generate another install script for after chrooting
+function generate_package_script() {
+  echo "
+  #!/bin/bash
+
+  # Install Xorg.
+  echo 'Installing Xorg...';
+  sleep 2;
+  pacman -S xorg xterm xorg-xinit;
+
+  echo 'Choose your desktop manager: ';
+  DE=('GNOME', 'Cinnamon', 'MATE', 'LXDE', 'KDE', 'None');
+
+  # Choose a desktop environment
+  select DESKTOP_ENV in \${DE[@]};do
+    case \$DESKTOP_ENV in
+      'GNOME,')
+        echo 'Installing GNOME...';
+        sleep 2
+        pacman -S gnome gnome-extra networkmanager;
+        break;
+        ;;
+
+      'Cinnamon,')
+        echo 'Installing Cinnamon...';
+        sleep 2;
+        pacman -S cinnamon gnome-terminal networkmanager;
+        break;
+        ;;
+
+      'MATE,')
+        echo 'Installing MATE...';
+        sleep 2;
+        pacman -S mate mate-extra networkmanager;
+        break;
+        ;;
+
+      'LXDE,')
+        echo 'Installing LXDE...';
+        sleep 2
+        pacman -S lxde networkmanager;
+        break;
+        ;;
+
+      'KDE,')
+        echo 'Installing KDE...'
+        sleep 2
+        pacman -S plasma networkmanager;
+        break;
+        ;;
+
+      'None')
+        echo 'Skipping Desktop Environment';
+        break;
+        ;;
+
+      *)
+        echo 'Invalid Option!';
+        ;;
+    esac
+  done;
+
+  # Set hostname
+  echo 'What would you like your hostname to be? (EX. Archey)';
+  read hostname;
+  echo \$hotname > /etc/hostname;
+  clear;
+
+  # Set Timezone
+  echo 'Start timezone settings...';
+  sleep 2;
+  TIME_ZONE_COUNTRIES=(/usr/share/zoneinfo/*);
+
+  echo 'Choose a timezone country: ';
+  select TIMEZONE_REGION in \${TIME_ZONE_COUNTRIES[@]};do
+    echo 'You selected ' \$TIMEZONE_REGION;
+    echo 'Select a timezone region.';
+    break;
+  done;
+
+  select TIMEZONE in \$TIMEZONE_REGION/*;do
+    echo 'Your time zone is ' \$TIMEZONE;
+    ln -sf \$TIMEZONE /etc/localtime;
+    echo 'timezone set...';
+    break;
+  done;
+
+  hwclock --systohc;
+  clear;
+
+  # Select and generate locale
+  echo 'Select your desired locale...'
+  sleep 2;
+  clear;
+  nano /etc/locale.gen;
+  locale-gen
+  echo 'What is your locale? (EX. en_US.UTF-8)';
+  read locale
+  echo LANG=\$locale > /etc/locale.conf
+  clear;
+
+  # Set password
+  echo 'Set a root password...';
+  sleep 2
+  passwd;
+  " > installpkgs;
+
+  chmod +x ./installpkgs;
+  mv ./installpkgs /mnt/;
+}
+
+function ask() {
+  echo -n "$1";
+  read input;
+}
 # Check if ran as root
 if [ $EUID != 0 ]; then
   echo "Script must be ran as root.";
@@ -106,20 +224,26 @@ echo "Home Partition: " $HOME_PART;
 echo "Swap Partition: " $SWAP_PART;
 echo "------------------------------------------------";
 
-# Format partitions
-if [ $EFI -eq 1 ];then
-  echo "Formatting for EFI Boot Partition.";
-  mkfs.fat -F32 $BOOT_PART;
+ask "THIS WILL DELETE EVERYTHING!  Do you want to format " $device"? (y, n)";
+
+if [ "$input" == "y" ] || [ "$input" == "" ];then
+  # Format partitions
+  if [ $EFI -eq 1 ];then
+    echo "Formatting for EFI Boot Partition.";
+    mkfs.fat -F32 $BOOT_PART;
+  fi
+
+  echo "Formatting Root partition.";
+  mkfs.ext4 -F $ROOT;
+
+  echo "Formatting Home Partition.";
+  mkfs.ext4 -F $HOME_PART;
+
+  echo "Creating Swap Partition.";
+  mkswap -f $SWAP_PART;
+else
+  exit;
 fi
-
-echo "Formatting Root partition.";
-mkfs.ext4 $ROOT;
-
-echo "Formatting Home Partition.";
-mkfs.ext4 $HOME_PART;
-
-echo "Creating Swap Partition.";
-mkswap $SWAP_PART;
 
 # Mount partitions
 echo "Mounting Partitions..."
@@ -132,22 +256,43 @@ mount $HOME_PART /mnt/home;
 mkdir /mnt/boot;
 mount $BOOT_PART /mnt/boot;
 
-# Rank mirrors
-echo "Ranking Mirrors by connection speed.";
-cp /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.back;
-rankmirrors /etc/pacman.d/mirrorlist > /etc/pacman.d/mirrorlist.back;
-echo "Ranking mirror connections...Please Wait.";
-mv /etc/pacman.d/mirrorlist.back /etc/pacman.d/mirrorlist;
+lsblk
+ask "Partitions are mounted...Does everything look correct? (y, n)"
+
+if [ "$input" == "y" ] || [ "$input" == "" ];then
+  # Rank mirrors
+  #echo "Ranking Mirrors by connection speed.";
+  clear;
+  echo "Ranking mirror connections...Please Wait.  NOTE: This can take a while.";
+  cp /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.back;
+  rankmirrors /etc/pacman.d/mirrorlist > /etc/pacman.d/mirrorlist.back;
+  mv /etc/pacman.d/mirrorlist.back /etc/pacman.d/mirrorlist;
+fi
 
 # Install base
-echo "Start Install (y,n)";
+echo "Start Install? (y,n)";
 read START_INSTALL;
 if [ "$START_INSTALL" == "y" ] || [ "$START_INSTALL" == "Y" ] || [ "$START_INSTALL" == "" ];then
   pacstrap /mnt base base-devel
   clear
+
+  echo "Generating fstab in /etc/fstab";
   genfstab -U /mnt > /mnt/etc/fstab;
-  arch-chroot /mnt;
-  echo "You are now in you system.  Will you see this message?";
+
+  echo "Generating package install script.";
+  generate_package_script;
+  echo "####################################################################################################################";
+  echo "Don't forget to run the Package Install Script when you chroot to get a basic gui working!  (EX.'./installpkgs')"
+  ask "Would you like to chroot into the new system (y, n)";
+  echo "####################################################################################################################";
+  read $input;
+
+  if [ "$input" == "y" ] || [ "$input" == "" ];then
+    arch-chroot /mnt;
+  else
+    exit;
+  fi
+
 else
   echo "Closing...";
   exit;
