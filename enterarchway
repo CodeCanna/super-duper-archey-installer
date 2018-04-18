@@ -6,7 +6,7 @@
 # TODO::DONE: Add lsblk after cfdisk.
 # TODO: Put everything in a function, IE Functionize.
 # TODO: Test for Legacy and fix any problems with Legacy install.
-# TODO: Fix line 85 syntax error on Package Install Script
+# TODO:DONE: Fix line 85 syntax error on Package Install Script
 
 clear;
 EFI=0;
