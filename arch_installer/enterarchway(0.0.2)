@@ -256,8 +256,8 @@ function create_parts() {
     done;
 
     if [ "$EFI" == "yes" ];
-    do
-      # Get boot partition.
+    then
+      # Get boot partition
       lsblk;
       ask "What is your BOOT partition? $DEV";
       read $answer;
@@ -274,7 +274,7 @@ function create_parts() {
     ask "Do you have a Home partition? [Y,N]";
     read $answer;
     if [ "$answer" == "y" ] || [ "$answer" == "" ];
-    do
+    then
       # Get home partition.
       HOME=true;
       lsblk;
@@ -287,7 +287,7 @@ function create_parts() {
     ask "Do you have a SWAP? [Y,N]";
     read $answer;
     if [ "$answer" == "y" ] || [ "$answer" == "" ];
-    do
+    then
       # Get SWAP partition.
       SWAP=true;
       lsblk;
@@ -302,17 +302,29 @@ function create_parts() {
     echo "Boot partition: $BOOT_PART";
     echo "Root partition: $ROOT_PART";
     if [ $SWAP == true ];
-    do
+    then
       echo "SWAP partition: $SWAP_PART";
     else
       echo "No SWAP partition.";
     if [ $HOME == true ];
-    do
+    then
       echo "Home partition: $HOME_PART";
     else
       echo "No Home partition.";
     fi
     echo "--------------------------------------";
+    fi
+  fi
+}
+
+# Mount partitions
+function mount_parts() {
+  mount $ROOT_PART /mnt;
+  mkdir boot;
+  if [ $HOME == true ];
+  then
+    mkdir /mnt/home;
+    mount $HOME_PART /mnt/home;
   fi
 }
 get_devices;

@@ -1,7 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-EFI="no"
-if [ "$EFI" == "no" ];
-do
-  echo "NO EFI";
+
+num=false;
+if [ $num == true ];
+then
+  echo "noodle";
+else
+  echo "No Noodles!!";
 fi
