@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+EFI="no"
+if [ "$EFI" == "no" ];
+do
+  echo "NO EFI";
+fi

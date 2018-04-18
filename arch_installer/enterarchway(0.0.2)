@@ -1,0 +1,319 @@
+#!/bin/bash
+
+# TODO::DONE: Fix not mounting root bug.
+# TODO::DONE: Fix not turning swap on.
+# TODO::DONE: Fix cfdisk menu option.
+# TODO: Keep testing it until it is easy to use.
+# TODO::DONE: Add lsblk after cfdisk.
+# TODO: Put everything in a function, IE Functionize.
+# TODO::DONE: Test for Legacy and fix any problems with Legacy install.
+# TODO::DONE: Fix line 85 syntax error on Package Install Script
+# TODO: Add automatic partitioning option.
+# TODO: Add partition selection menu for manual partition option.
+
+clear;
+
+if [ $EUID != 0 ];
+then
+  echo "Script must be ran as root.";
+  exit 0;
+fi
+
+# Generate another install script for after chrooting
+function generate_package_script() {
+  echo "
+  #!/bin/bash
+
+  # Install Xorg.
+  echo 'Installing Xorg...';
+  sleep 2;
+  pacman -S xorg xterm xorg-xinit;
+
+  echo 'Choose your desktop manager: ';
+  DE=('GNOME', 'Cinnamon', 'MATE', 'LXDE', 'KDE', 'None');
+
+  # Choose a desktop environment
+  select DESKTOP_ENV in \${DE[@]};do
+    case \$DESKTOP_ENV in
+      'GNOME,')
+        echo 'Installing GNOME...';
+        sleep 2
+        pacman -S gnome gnome-extra networkmanager;
+        break;
+        ;;
+
+      'Cinnamon,')
+        echo 'Installing Cinnamon...';
+        sleep 2;
+        pacman -S cinnamon gnome-terminal networkmanager;
+        break;
+        ;;
+
+      'MATE,')
+        echo 'Installing MATE...';
+        sleep 2;
+        pacman -S mate mate-extra networkmanager;
+        break;
+        ;;
+
+      'LXDE,')
+        echo 'Installing LXDE...';
+        sleep 2
+        pacman -S lxde networkmanager;
+        break;
+        ;;
+
+      'KDE,')
+        echo 'Installing KDE...'
+        sleep 2
+        pacman -S plasma networkmanager;
+        break;
+        ;;
+
+      'None')
+        echo 'Skipping Desktop Environment';
+        break;
+        ;;
+
+      *)
+        echo 'Invalid Option!';
+        ;;
+    esac
+  done;
+
+  # Set hostname
+  echo 'What would you like your hostname to be? (EX. Archey)';
+  read hostname;
+  echo \$hotname > /etc/hostname;
+  clear;
+
+  # Set Timezone
+  echo 'Start timezone settings...';
+  sleep 2;
+  TIME_ZONE_COUNTRIES=(/usr/share/zoneinfo/*);
+
+  echo 'Choose a timezone country: ';
+  select TIMEZONE_REGION in \${TIME_ZONE_COUNTRIES[@]};do
+    echo 'You selected ' \$TIMEZONE_REGION;
+    echo 'Select a timezone region.';
+    break;
+  done;
+
+  select TIMEZONE in \$TIMEZONE_REGION/*;do
+    echo 'Your time zone is ' \$TIMEZONE;
+    ln -sf \$TIMEZONE /etc/localtime;
+    echo 'timezone set...';
+    break;
+  done;
+
+  hwclock --systohc;
+  clear;
+
+  # Select and generate locale
+  echo 'Select your desired locale...'
+  sleep 2;
+  clear;
+  nano /etc/locale.gen;
+  locale-gen
+  echo 'What is your locale? (EX. en_US.UTF-8)';
+  read locale
+  echo LANG=\$locale > /etc/locale.conf
+  clear;
+
+  # Set password
+  echo 'Set a root password...';
+  sleep 2
+  passwd;
+  " > installpkgs;
+
+  chmod +x ./installpkgs;
+  mv ./installpkgs /mnt/;
+}
+
+# Check for EFI
+EFI="no";
+if [ -d /sys/firmware/efi ];
+then
+  EFI="yes";
+else
+  EFI="no";
+fi
+
+# A function for input.
+function ask() {
+  echo -n "$1";
+  read answer;
+}
+
+function logo() {
+  echo "------------------------------------------------------------------";
+  echo "-  WELCOME TO ENTERARCHWAY - MY FIRST ARCHLINUX INSTALL SCRIPT!  -";
+  echo "------------------------------------------------------------------";
+
+  if [ "$EFI" == "yes" ]; then
+    EFI=1;
+    echo "You are in UEFI boot mode.";
+  else
+    echo "You are in Legacy boot mode";
+  fi
+}
+
+function get_devices() {
+    clear;
+    DEVICE_ARRAY=();
+    LOOP=true;
+    while [ $LOOP == true ];
+    do
+      for device in /dev/sd?;
+      do
+        DEVICE_ARRAY+=($device);  #Add block devices to array.
+      done;
+      echo ${DEVICE_ARRAY[@]};
+
+      select DEV in ${DEVICE_ARRAY[@]};
+      do
+        ask "Install Archlinux on $DEV? [Y,N]";
+        if [ "$answer" == "y" ] || [ "$answer" == "" ];
+        then
+          LOOP=false;
+          break;
+        else
+          LOOP=true;
+          clear;
+          get_devices;
+        fi
+      done;
+    done;
+}
+
+function create_parts() {
+  PART_TOOLS=("parted", "gdisk", "cfdisk", "fdisk");
+
+  ask "Automatic partitioning? [Y,N]";
+  read $answer;
+  if [ "$answer" == "y" ] || [ "$answer" == "" ];
+  then
+    if [ "$EFI" == "yes" ];
+    then
+      # EFI Partitioning.
+      echo "Partitioning for EFI...";
+      sleep 2;
+      parted -s $DEV mklabel gpt;                              # Create GPT Label.
+      parted -s $DEV mkpart ESP fat32 1Mib 1025;               # Create EFI System Partition.
+      parted -s $DEV mkpart primary ext4 1025Mib 20Gib;        # Create Root Partition.
+      parted -s $DEV mkpart primary linux-swap 20Gib 24Gib;    # Create Swap Partition.
+      parted -s $DEV mkpart primary ext4 24Gib 100%;           # Create Home Partition
+    else
+      # Legacy Partitioning
+      parted -s $DEV mklabel dos;                              # Create DOS Label.
+      parted -s $DEV mkpart primary ext4 1Mib 20Gib            # Create Root Partition.
+      parted -s $DEV mkpart primary linux-swap 20Gib 24Gib;    # Create Swap Partition.
+      parted -s $DEV mkpart primary ext4 24Gib 100%            # Create Home Partition.
+
+    fi
+
+  else
+
+    # Manual partitioning.
+    if [ "$EFI" == "yes" ];
+    then
+      echo "###################################################################################";
+      echo "REMEMBER! you are booted in UEFI mode and must include an 'EFI System Partition!'";
+      echo "###################################################################################";
+    else
+      echo "###################################################################################";
+      echo "REMEMBER! you are booted in Legacy mode and must include a BIOS Boot Partition";
+      echo "###################################################################################";
+    fi
+
+    select PTOOL in ${PART_TOOLS[@]};
+    do
+      case $PTOOL in
+        "parted,")
+          parted $DEV;
+          break;
+          ;;
+
+        "gdisk,")
+          gdisk $DEV;
+          break;
+          ;;
+
+        "cfdisk,")
+          cfdisk $DEV;
+          break;
+          ;;
+
+        "fdisk,")
+          fdisk $DEV;
+          break;
+          ;;
+
+        *)
+          echo "Invalid input, please choose a valid option.";
+          ;;
+      esac;
+    done;
+
+    if [ "$EFI" == "yes" ];
+    do
+      # Get boot partition.
+      lsblk;
+      ask "What is your BOOT partition? $DEV";
+      read $answer;
+      BOOT_PART=$DEV$answer;
+    fi
+
+    # Get root partition.
+    lsblk;
+    ask "What is your ROOT partition? $DEV";
+    read $answer;
+    ROOT_PART=$DEV$answer;
+
+    # Home partition?
+    ask "Do you have a Home partition? [Y,N]";
+    read $answer;
+    if [ "$answer" == "y" ] || [ "$answer" == "" ];
+    do
+      # Get home partition.
+      HOME=true;
+      lsblk;
+      ask "What is your HOME partition? $DEV";
+      read $answer;
+      HOME_PART=$DEV$answer;
+    fi
+
+    # SWAP Partition?
+    ask "Do you have a SWAP? [Y,N]";
+    read $answer;
+    if [ "$answer" == "y" ] || [ "$answer" == "" ];
+    do
+      # Get SWAP partition.
+      SWAP=true;
+      lsblk;
+      ask "What is your SWAP partition? $DEV";
+      read $answer;
+      SWAP_PART=$DEV$answer;
+    fi
+
+    # Display partition layout.
+    echo "Partitoin Layout";
+    echo "--------------------------------------";
+    echo "Boot partition: $BOOT_PART";
+    echo "Root partition: $ROOT_PART";
+    if [ $SWAP == true ];
+    do
+      echo "SWAP partition: $SWAP_PART";
+    else
+      echo "No SWAP partition.";
+    if [ $HOME == true ];
+    do
+      echo "Home partition: $HOME_PART";
+    else
+      echo "No Home partition.";
+    fi
+    echo "--------------------------------------";
+  fi
+}
+get_devices;
+create_parts;
